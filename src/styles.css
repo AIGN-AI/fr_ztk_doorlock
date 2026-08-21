@@ -33,7 +33,9 @@ body {
 
 button,
 .button,
-input {
+input,
+select,
+textarea {
   border-radius: var(--radius);
   font: inherit;
 }
@@ -59,7 +61,9 @@ button:hover,
 
 button:focus-visible,
 .button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid rgba(8, 127, 122, 0.28);
   outline-offset: 2px;
 }
@@ -130,10 +134,17 @@ label {
   font-weight: 700;
 }
 
-input {
+input,
+select,
+textarea {
   border: 1px solid var(--line);
   min-height: 40px;
   padding: 0 12px;
+}
+
+textarea {
+  padding: 10px 12px;
+  resize: vertical;
 }
 
 .error {
@@ -221,7 +232,9 @@ nav button:hover {
 .warning-row,
 .table-block,
 .inline-form,
-.filters {
+.filters,
+.note-form,
+.user-form {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -273,7 +286,9 @@ nav button:hover {
 
 .inline-form,
 .filters,
-.toolbar {
+.toolbar,
+.note-form,
+.user-form {
   align-items: end;
   display: grid;
   gap: 14px;
@@ -296,6 +311,24 @@ nav button:hover {
 
 .report-filters {
   grid-template-columns: 180px 180px 180px auto;
+}
+
+.note-form {
+  grid-template-columns: minmax(220px, 1fr) 150px 150px 160px 160px minmax(220px, 1fr) auto;
+}
+
+.user-form {
+  grid-template-columns: 180px minmax(220px, 1fr) 140px 180px auto;
+}
+
+.wide-field {
+  min-width: 0;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .table-block {
@@ -329,6 +362,24 @@ th {
 
 tbody tr:hover {
   background: #f4faf8;
+}
+
+.attendance-photo-link {
+  display: inline-flex;
+  border-radius: 8px;
+}
+
+.attendance-photo-link:focus-visible {
+  outline: 3px solid rgba(8, 127, 122, 0.28);
+  outline-offset: 2px;
+}
+
+.attendance-photo {
+  border-radius: 8px;
+  display: block;
+  height: 48px;
+  object-fit: cover;
+  width: 48px;
 }
 
 .status-chip {
@@ -413,7 +464,9 @@ tbody tr:hover {
   .metrics,
   .inline-form,
   .filters,
-  .toolbar {
+  .toolbar,
+  .note-form,
+  .user-form {
     grid-template-columns: 1fr;
   }
 

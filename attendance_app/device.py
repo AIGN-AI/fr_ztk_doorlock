@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime
+import re
 from struct import pack
 
 
@@ -45,6 +46,22 @@ def serialize_attendance(record):
         "status": int(getattr(record, "status", 0) or 0),
         "punch": int(getattr(record, "punch", 0) or 0),
         "source": "device",
+    }
+
+
+def parse_attendance_photo_name(name):
+    stem = str(name).strip().removesuffix(".jpg").removesuffix(".JPG")
+    match = re.fullmatch(r"(\d{14})-([A-Za-z0-9_-]+)", stem)
+    if not match:
+        return None
+    try:
+        timestamp = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    return {
+        "filename": f"{stem}.jpg",
+        "employee_code": match.group(2),
+        "timestamp": timestamp.isoformat(),
     }
 
 
@@ -101,6 +118,31 @@ class ZKDevice:
 
     def attendance(self):
         return self._with_conn(lambda conn: [serialize_attendance(record) for record in conn.get_attendance()])
+
+    def attendance_photos(self, start, end, known_names=()):
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+        known_names = set(known_names)
+
+        def read(conn):
+            encoding = getattr(conn, "encoding", "UTF-8")
+            names = _read_photo_data(conn, 0x7E0, pack("<i", 0)).rstrip(b"\x00").decode(encoding, errors="ignore")
+            photos = []
+            matched = 0
+            for name in names.replace("\n", "\t").split("\t"):
+                photo = parse_attendance_photo_name(name)
+                if not photo or not start_date <= datetime.fromisoformat(photo["timestamp"]).date() <= end_date:
+                    continue
+                matched += 1
+                if photo["filename"] in known_names:
+                    continue
+                data = _read_photo_data(conn, 0x7DE, photo["filename"].encode(encoding) + b"\x00")
+                if not data.startswith(b"\xff\xd8"):
+                    raise RuntimeError(f"data foto tidak valid: {photo['filename']}")
+                photos.append({**photo, "data": data})
+            return {"matched": matched, "photos": photos}
+
+        return self._with_conn(read)
 
     def set_time(self, timestamp=None):
         timestamp = timestamp or datetime.now()
@@ -192,3 +234,15 @@ def _safe(conn, method_name):
         return getattr(conn, method_name)()
     except Exception as exc:
         return {"error": str(exc)}
+
+
+def _read_photo_data(conn, command, payload):
+    from zk import const
+    from zk.exception import ZKErrorResponse
+
+    response = conn._ZK__send_command(command, payload, 1024)
+    if not response.get("status"):
+        raise ZKErrorResponse(f"device menolak perintah foto {command}")
+    if response["code"] in {const.CMD_PREPARE_DATA, const.CMD_DATA}:
+        return conn._ZK__recieve_chunk()
+    return conn._ZK__data

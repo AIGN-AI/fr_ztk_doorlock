@@ -42,6 +42,7 @@ Buka `http://127.0.0.1:5173`.
 ## Notes
 
 - Absensi dilakukan di mesin; app menarik log dan membuat report.
+- Tombol `Tarik foto` mengambil foto sesuai rentang tanggal dan menyimpannya di `data/attendance_photos`.
 - Enrollment biometrik dilakukan manual dari layar mesin.
-- App tidak menyimpan template wajah/fingerprint.
+- App tidak menyimpan template wajah/fingerprint; foto absensi hanya dapat dibuka setelah login.
 - Jangan pakai endpoint destructive pyzk seperti `clear_attendance` atau `clear_data`.
