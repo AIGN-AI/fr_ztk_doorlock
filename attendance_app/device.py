@@ -146,87 +146,49 @@ class ZKDevice:
 
     def set_time(self, timestamp=None):
         timestamp = timestamp or datetime.now()
-        return self._with_conn(lambda conn: conn.set_time(timestamp))
 
-    def set_user(self, employee):
         def write(conn):
-            return set_user_with_time_period(
-                conn,
-                uid=employee.get("uid"),
-                name=employee["name"],
-                privilege=int(employee.get("privilege") or 0),
-                password=employee.get("password", ""),
-                group_id="1",
-                user_id=str(employee["employee_code"]),
-                card=int(employee.get("card") or 0),
-                time_period=1,
-            )
+            result = conn.set_time(timestamp)
+            conn.refresh_data()
+            return result
 
         return self._with_conn(write)
 
+    def set_user(self, employee):
+        def write(conn):
+            uid = employee.get("uid")
+            if uid is None:
+                matched = [user for user in conn.get_users() if str(user.user_id) == str(employee["employee_code"])]
+                uid = matched[0].uid if matched else conn.next_uid
+            from zk import const
+            from zk.exception import ZKErrorResponse
 
-def set_user_with_time_period(conn, uid=None, name="", privilege=0, password="", group_id="1", user_id="", card=0, time_period=1):
-    from zk import const
-    from zk.exception import ZKErrorResponse
+            encoding = getattr(conn, "encoding", "UTF-8")
+            payload = pack(
+                "<HB8s24sIB4H24s",
+                int(uid),
+                int(employee.get("privilege") or 0),
+                employee.get("password", "").encode(encoding),
+                employee["name"].encode(encoding),
+                int(employee.get("card") or 0),
+                1,
+                1,
+                1,
+                0,
+                0,
+                str(employee["employee_code"]).encode(encoding),
+            )
+            response = conn._ZK__send_command(
+                const.CMD_USER_WRQ,
+                payload,
+                1024,
+            )
+            if not response.get("status"):
+                raise ZKErrorResponse("Can't set user")
+            conn.refresh_data()
+            return True
 
-    users = conn.get_users()
-    if uid is None and user_id:
-        matched = [user for user in users if str(user.user_id) == str(user_id)]
-        uid = matched[0].uid if matched else None
-    if uid is None:
-        uid = conn.next_uid
-    if not user_id:
-        user_id = str(uid)
-    if privilege not in [const.USER_DEFAULT, const.USER_ADMIN]:
-        privilege = const.USER_DEFAULT
-
-    payload = pack_user_payload(
-        packet_size=int(conn.user_packet_size),
-        uid=int(uid),
-        name=name,
-        privilege=int(privilege),
-        password=password,
-        group_id=group_id,
-        user_id=str(user_id),
-        card=int(card or 0),
-        encoding=conn.encoding,
-        time_period=int(time_period or 1),
-    )
-    response = conn._ZK__send_command(const.CMD_USER_WRQ, payload, 1024)
-    if not response.get("status"):
-        raise ZKErrorResponse("Can't set user")
-    conn.refresh_data()
-    return True
-
-
-def pack_user_payload(packet_size, uid, name, privilege, password, group_id, user_id, card, encoding, time_period=1):
-    if int(packet_size) == 28:
-        return pack(
-            "HB5s8sIxBHI",
-            uid,
-            privilege,
-            str(password).encode(encoding, errors="ignore"),
-            str(name).encode(encoding, errors="ignore"),
-            int(card),
-            int(group_id or 0),
-            int(time_period or 1),
-            int(user_id),
-        )
-
-    name_pad = str(name).encode(encoding, errors="ignore").ljust(24, b"\x00")[:24]
-    group_pad = str(group_id or "1").encode(encoding, errors="ignore").ljust(7, b"\x00")[:7]
-    user_id_pad = str(user_id).encode(encoding, errors="ignore").ljust(24, b"\x00")[:24]
-    return pack(
-        "<HB8s24sIB7sx24s",
-        uid,
-        privilege,
-        str(password).encode(encoding, errors="ignore"),
-        name_pad,
-        int(card),
-        int(time_period or 1),
-        group_pad,
-        user_id_pad,
-    )
+        return self._with_conn(write)
 
 
 def _safe(conn, method_name):

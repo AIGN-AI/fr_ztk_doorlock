@@ -9,7 +9,6 @@ from attendance_app.device import (
     AttendanceRecord,
     DeviceUser,
     ZKDevice,
-    pack_user_payload,
     serialize_attendance,
     serialize_user,
 )
@@ -236,47 +235,61 @@ class AttendanceAppTest(TestCase):
         self.assertEqual(serialize_user(user)["employee_code"], "1002")
         self.assertEqual(serialize_attendance(attendance)["timestamp"], "2026-07-21T09:00:00")
 
-    def test_push_user_uses_default_access_group(self):
-        payload = pack_user_payload(
-            packet_size=72,
-            uid=1,
-            name="Ayu",
-            privilege=0,
-            password="",
-            group_id="1",
-            user_id="1001",
-            card=0,
-            encoding="UTF-8",
+    def test_push_user_sets_group_and_personal_time_period(self):
+        class FakeConnection:
+            def set_user(self, **kwargs):
+                return True
+
+            def _ZK__send_command(self, command, payload, response_size):
+                self.user_command = (command, payload, response_size)
+                return {"status": True}
+
+            def refresh_data(self):
+                self.refreshed = True
+
+        connection = FakeConnection()
+        device = ZKDevice()
+        device._with_conn = lambda callback: callback(connection)
+
+        result = device.set_user(
+            {
+                "uid": 7,
+                "employee_code": "1001",
+                "name": "Ayu",
+                "privilege": 0,
+                "password": "",
+                "card": 23,
+            }
         )
 
-        self.assertEqual(payload[40:47].rstrip(b"\x00"), b"1")
-
-    def test_user_payload_enables_first_time_period_for_zk6(self):
-        payload = pack_user_payload(
-            packet_size=28,
-            uid=1,
-            name="Ayu",
-            privilege=0,
-            password="",
-            group_id="1",
-            user_id="1001",
-            card=0,
-            encoding="UTF-8",
-        )
-
-        self.assertEqual(payload[22], 1)
-
-    def test_user_payload_enables_first_time_period_for_zk8(self):
-        payload = pack_user_payload(
-            packet_size=72,
-            uid=1,
-            name="Ayu",
-            privilege=0,
-            password="",
-            group_id="1",
-            user_id="1001",
-            card=0,
-            encoding="UTF-8",
-        )
-
+        self.assertTrue(result)
+        command, payload, response_size = connection.user_command
+        self.assertEqual(command, 8)
+        self.assertEqual(response_size, 1024)
+        self.assertEqual(len(payload), 72)
+        self.assertEqual(payload[:3], b"\x07\x00\x00")
+        self.assertEqual(payload[35:39], b"\x17\x00\x00\x00")
         self.assertEqual(payload[39], 1)
+        self.assertEqual(payload[40:48], b"\x01\x00\x01\x00\x00\x00\x00\x00")
+        self.assertEqual(payload[48:72].rstrip(b"\x00"), b"1001")
+        self.assertTrue(connection.refreshed)
+
+    def test_sync_time_refreshes_device(self):
+        class FakeConnection:
+            def set_time(self, timestamp):
+                self.timestamp = timestamp
+                return True
+
+            def refresh_data(self):
+                self.refreshed = True
+
+        connection = FakeConnection()
+        device = ZKDevice()
+        device._with_conn = lambda callback: callback(connection)
+        timestamp = datetime(2026, 9, 1, 13, 15)
+
+        result = device.set_time(timestamp)
+
+        self.assertTrue(result)
+        self.assertEqual(connection.timestamp, timestamp)
+        self.assertTrue(connection.refreshed)
