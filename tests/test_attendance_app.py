@@ -274,6 +274,81 @@ class AttendanceAppTest(TestCase):
         self.assertEqual(payload[48:72].rstrip(b"\x00"), b"1001")
         self.assertTrue(connection.refreshed)
 
+    def test_attendance_reads_attlog_when_device_rejects_prepare_buffer(self):
+        """MiniAC Plus (ZAM170_TFT, Ver 6.60) menolak CMD_PREPARE_BUFFER (1503) untuk
+        attlog tapi menerimanya untuk tabel user, jadi pyzk.get_attendance() gagal total.
+
+        free sizes dan record user di bawah ini adalah byte asli dari device
+        10.10.10.9 (serial CKUH202361534), hanya counter user/record yang
+        dinaikkan ke 1 supaya pyzk melewati early-return `records == 0`.
+        """
+        from struct import pack
+        from zk import ZK, const
+
+        free_sizes = bytearray(
+            bytes.fromhex(
+                "00000000000000000000000000000000"
+                "20000000000000000000000000000000"
+                "000000001e00000000000000010000000000000000000000"
+                "b80b0000f049020000000000980b0000f0490200"
+                "02000000b60b0000b80b0000"
+                "0000000000000000000000000000"
+            )
+        )
+        free_sizes[16:20] = pack("<i", 1)  # users
+        free_sizes[32:36] = pack("<i", 1)  # records
+        user_row = bytes.fromhex(
+            "17000e00000000000000004d2e205a61666965722046617a61"
+            "0000000000000000000000000000010100010000000000"
+            "303232363036303032370000000000000000000000000000"
+        )
+        self.assertEqual(len(user_row), 72)
+        user_table = pack("<I", len(user_row)) + user_row
+
+        conn = ZK("127.0.0.1")
+        conn._ZK__tcp_length = 0
+        stamp = pack("<I", conn._ZK__encode_time(datetime(2026, 9, 7, 18, 30, 15)))
+        attlog_row = pack("<H24sB4sB8s", 23, b"0226060027", 0, stamp, 1, b"")
+        seen = []
+
+        def send(command, payload=b"", response_size=8):
+            seen.append(command)
+            if command == const.CMD_GET_FREE_SIZES:
+                conn._ZK__data = bytes(free_sizes)
+                return {"status": True, "code": const.CMD_ACK_OK}
+            if command == 1503:  # CMD_PREPARE_BUFFER, tidak ada di const pyzk
+                inner = pack("<bhii", 1, const.CMD_USERTEMP_RRQ, const.FCT_USER, 0)
+                if payload == inner:
+                    conn._ZK__data = user_table
+                    return {"status": True, "code": const.CMD_DATA}
+                conn._ZK__data = b""
+                return {"status": False, "code": const.CMD_ACK_UNAUTH}
+            if command == const.CMD_ATTLOG_RRQ:
+                return {"status": True, "code": const.CMD_PREPARE_DATA}
+            raise AssertionError(command)
+
+        conn._ZK__send_command = send
+        conn._ZK__recieve_chunk = lambda: attlog_row
+
+        device = ZKDevice()
+        device._with_conn = lambda callback: callback(conn)
+
+        self.assertEqual(
+            device.attendance(),
+            [
+                {
+                    "user_id": "0226060027",
+                    "uid": 23,
+                    "timestamp": "2026-09-07T18:30:15",
+                    "status": 0,
+                    "punch": 1,
+                    "source": "device",
+                }
+            ],
+        )
+        self.assertIn(const.CMD_ATTLOG_RRQ, seen)
+        self.assertNotIn("read_with_buffer", vars(conn))  # patch dilepas lagi
+
     def test_sync_time_refreshes_device(self):
         class FakeConnection:
             def set_time(self, timestamp):

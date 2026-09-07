@@ -117,7 +117,7 @@ class ZKDevice:
         return self._with_conn(lambda conn: [serialize_user(user) for user in conn.get_users()])
 
     def attendance(self):
-        return self._with_conn(lambda conn: [serialize_attendance(record) for record in conn.get_attendance()])
+        return self._with_conn(lambda conn: [serialize_attendance(record) for record in read_attendance(conn)])
 
     def attendance_photos(self, start, end, known_names=()):
         start_date = date.fromisoformat(start)
@@ -189,6 +189,49 @@ class ZKDevice:
             return True
 
         return self._with_conn(write)
+
+
+def read_attendance(conn):
+    """Baca attlog, termasuk di firmware yang menolak CMD_PREPARE_BUFFER.
+
+    pyzk selalu mengambil attlog lewat buffered read (perintah 1503). MiniAC Plus
+    (ZAM170_TFT, Ver 6.60) menolaknya dengan "RWB Not supported", walau perintah
+    yang sama sukses untuk tabel user. Jadi kalau buffered read ditolak, attlog
+    diambil lewat protokol chunk lama dan parsing tetap diserahkan ke pyzk.
+    """
+    from zk import const
+    from zk.exception import ZKErrorResponse
+
+    try:
+        return conn.get_attendance()
+    except ZKErrorResponse:
+        pass
+
+    buffered = conn.read_with_buffer
+
+    def read(command, fct=0, ext=0):
+        if command != const.CMD_ATTLOG_RRQ:
+            return buffered(command, fct, ext)
+        return _read_attlog_chunk(conn)
+
+    conn.read_with_buffer = read
+    try:
+        return conn.get_attendance()
+    finally:
+        del conn.read_with_buffer
+
+
+def _read_attlog_chunk(conn):
+    from zk import const
+    from zk.exception import ZKErrorResponse
+
+    response = conn._ZK__send_command(const.CMD_ATTLOG_RRQ, b"", 1024)
+    if not response.get("status"):
+        raise ZKErrorResponse("device menolak CMD_ATTLOG_RRQ")
+    if response["code"] not in {const.CMD_PREPARE_DATA, const.CMD_DATA}:
+        return b"\x00\x00\x00\x00", 4
+    data = conn._ZK__recieve_chunk() or b""
+    return pack("<I", len(data)) + data, len(data) + 4
 
 
 def _safe(conn, method_name):
