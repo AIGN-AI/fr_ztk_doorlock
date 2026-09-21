@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from attendance_app.db import Database, rows_to_csv, rows_to_excel_html, today_range
@@ -323,6 +324,10 @@ def create_app(db=None, device=None, photo_dir=None):
             "today": database.daily_report(today, today),
             "last_sync": database.last_sync(),
         }
+
+    dist_dir = Path(__file__).resolve().parent.parent / "dist"
+    if dist_dir.is_dir():
+        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 
     return app
 
