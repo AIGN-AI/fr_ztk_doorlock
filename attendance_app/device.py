@@ -126,12 +126,10 @@ class ZKDevice:
 
         def read(conn):
             encoding = getattr(conn, "encoding", "UTF-8")
-            names = _read_photo_data(conn, 0x7E0, pack("<i", 0)).rstrip(b"\x00").decode(encoding, errors="ignore")
             photos = []
             matched = 0
-            for name in names.replace("\n", "\t").split("\t"):
-                photo = parse_attendance_photo_name(name)
-                if not photo or not start_date <= datetime.fromisoformat(photo["timestamp"]).date() <= end_date:
+            for photo in _list_photo_entries(conn):
+                if not start_date <= datetime.fromisoformat(photo["timestamp"]).date() <= end_date:
                     continue
                 matched += 1
                 if photo["filename"] in known_names:
@@ -141,6 +139,36 @@ class ZKDevice:
                     raise RuntimeError(f"data foto tidak valid: {photo['filename']}")
                 photos.append({**photo, "data": data})
             return {"matched": matched, "photos": photos}
+
+        return self._with_conn(read)
+
+    def attendance_from_photos(self, start, end):
+        """Turunkan record attendance dari nama file Attendance Photo.
+
+        Dipakai saat ATTLOG kosong (mis. device cuma jalan mode akses/kamera
+        tanpa menulis tabel attendance). Nama file sudah menyimpan employee_code
+        dan timestamp, jadi cukup dipakai langsung sebagai record kehadiran.
+        """
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+
+        def read(conn):
+            logs = []
+            for photo in _list_photo_entries(conn):
+                timestamp = datetime.fromisoformat(photo["timestamp"])
+                if not start_date <= timestamp.date() <= end_date:
+                    continue
+                logs.append(
+                    {
+                        "user_id": photo["employee_code"],
+                        "uid": None,
+                        "timestamp": photo["timestamp"],
+                        "status": 0,
+                        "punch": 0,
+                        "source": "device_photo",
+                    }
+                )
+            return logs
 
         return self._with_conn(read)
 
@@ -239,6 +267,17 @@ def _safe(conn, method_name):
         return getattr(conn, method_name)()
     except Exception as exc:
         return {"error": str(exc)}
+
+
+def _list_photo_entries(conn):
+    encoding = getattr(conn, "encoding", "UTF-8")
+    names = _read_photo_data(conn, 0x7E0, pack("<i", 0)).rstrip(b"\x00").decode(encoding, errors="ignore")
+    entries = []
+    for name in names.replace("\n", "\t").split("\t"):
+        photo = parse_attendance_photo_name(name)
+        if photo:
+            entries.append(photo)
+    return entries
 
 
 def _read_photo_data(conn, command, payload):

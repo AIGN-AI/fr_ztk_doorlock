@@ -345,8 +345,13 @@ def _clock_warning(value):
 def _sync_attendance(database, zk_device):
     try:
         logs = zk_device.attendance()
+        message = "attendance synced"
+        if not logs:
+            today, _ = today_range()
+            logs = zk_device.attendance_from_photos(today, today)
+            message = "attendance synced (dari attendance photo, ATTLOG kosong)"
         inserted = database.upsert_attendance(logs)
-        database.log_sync("attendance", True, "attendance synced", pulled=len(logs), inserted=inserted)
+        database.log_sync("attendance", True, message, pulled=len(logs), inserted=inserted)
         return {"ok": True, "pulled": len(logs), "inserted": inserted}
     except Exception as exc:
         database.log_sync("attendance", False, str(exc))
