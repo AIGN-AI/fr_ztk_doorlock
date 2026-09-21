@@ -354,7 +354,10 @@ def _sync_attendance(database, zk_device):
 
 
 def _sync_attendance_photos(database, zk_device, photo_root, start, end):
-    known_names = database.attendance_photo_names()
+    known_names = {
+        name for name in database.attendance_photo_names()
+        if (photo_root / name).is_file()
+    }
     result = zk_device.attendance_photos(start, end, known_names)
     photo_root.mkdir(parents=True, exist_ok=True)
     records = []
